@@ -1,0 +1,16 @@
+2019/04/06 22:33:34 rpc.Register: method "CleanupFiles" has 1 input parameters; needs exactly three
+2019/04/06 22:33:34 rpc.Register: method "Lock" has 1 input parameters; needs exactly three
+2019/04/06 22:33:34 rpc.Register: method "Unlock" has 1 input parameters; needs exactly three
+2019/04/06 22:33:34 rpc.Register: method "Wait" has 1 input parameters; needs exactly three
+/var/tmp/824-501/mr31012-master: Starting Map/Reduce task test
+Schedule: 20 mapPhase tasks (10 I/Os)
+2019/04/06 22:33:34 rpc.Register: method "Lock" has 1 input parameters; needs exactly three
+2019/04/06 22:33:34 rpc.Register: method "Lock" has 1 input parameters; needs exactly three
+2019/04/06 22:33:34 rpc.Register: method "Unlock" has 1 input parameters; needs exactly three
+2019/04/06 22:33:34 rpc.Register: method "Unlock" has 1 input parameters; needs exactly three
+/var/tmp/824-501/mr31012-worker1: given mapPhase task #0 on file 824-mrinput-0.txt (nios: 10)
+/var/tmp/824-501/mr31012-worker0: given mapPhase task #1 on file 824-mrinput-1.txt (nios: 10)
+/var/tmp/824-501/mr31012-worker1: mapPhase task #0 done
+/var/tmp/824-501/mr31012-worker0: mapPhase task #1 done
+signal: interrupt
+FAIL	_/Users/apple/Desktop/cc/分布式网络和区块链和大数据集合/6.824/src/mapreduce	3.727s

@@ -33,6 +33,10 @@ type Master struct {
 
 // Register is an RPC method that is called by workers after they have started
 // up to report that they are ready to receive tasks.
+
+// RPC 通过 worker 调用注册进workers slice.
+// 增加 worker， 为防止race condition
+// 全程加锁
 func (mr *Master) Register(args *RegisterArgs, _ *struct{}) error {
 	mr.Lock()
 	defer mr.Unlock()
@@ -57,6 +61,17 @@ func newMaster(master string) (mr *Master) {
 
 // Sequential runs map and reduce tasks sequentially, waiting for each task to
 // complete before running the next.
+
+// 注意 distributed 模式 和 sequential 模式的区别
+// 这两个函数都调用 run 函数来完成 mapreduce 任务
+// 而 run 这个函数就是要等待 mapper 完成相应 任务后
+// 才能进行 reduce 任务 ，这个过程是串行进行的
+// 这里的顺序执行 和 并行执行的区别是
+// sequential 这个函数 不执行 schedule 方法
+// 也就是 sequential 是单机版的 MapReduce
+// 没什么卵用，是来检验 doMap() 和 doReduce()
+// 两个函数的正确情况的。
+
 func Sequential(jobName string, files []string, nreduce int,
 	mapF func(string, string) []KeyValue,
 	reduceF func(string, []string) string,
@@ -67,7 +82,7 @@ func Sequential(jobName string, files []string, nreduce int,
 		case mapPhase:
 			for i, f := range mr.files {
 				doMap(mr.jobName, i, f, mr.nReduce, mapF)
-			}
+			} // 将第i个输入文件分片给第i个mapper 执行
 		case reducePhase:
 			for i := 0; i < mr.nReduce; i++ {
 				doReduce(mr.jobName, i, mergeName(mr.jobName, i), len(mr.files), reduceF)
@@ -82,6 +97,11 @@ func Sequential(jobName string, files []string, nreduce int,
 // helper function that sends information about all existing
 // and newly registered workers to channel ch. schedule()
 // reads ch to learn about workers.
+// 使用condition_variable 等待worker 调用rpc方法注册到master中
+// 一旦有worker 注册 会mr.newCond.Broadcast() 唤醒所有因等待
+// 该事件的go 程， 并通过channel 发送出来
+// 这样 将map 任务 schedule 到对应注册的worker 中去
+
 func (mr *Master) forwardRegistrations(ch chan string) {
 	i := 0
 	for {
@@ -100,8 +120,19 @@ func (mr *Master) forwardRegistrations(ch chan string) {
 	}
 }
 
+
+
+
 // Distributed schedules map and reduce tasks on workers that register with the
 // master over RPC.
+// 这个函数 是master.go 中另一个最为重要的函数
+// 使用一个 channel 来等待 worker 通过 rpc 来注册到 master中
+// 这里所谓的 "distributed" 实际指的是这个实现
+// 是真的等待 worker 加入并分配任务的真分布式
+// 但我的问题是 可能随时有 worker 加入， 那么怎么分割输入文件呢
+// 毕竟我们连总共几个worker 都不知道。
+// 要注意的是除非是main 函数
+// 否则 函数 退出(exit) 后 其中新开的 Goroutine 会继续运行
 func Distributed(jobName string, files []string, nreduce int, master string) (mr *Master) {
 	mr = newMaster(master)
 	mr.startRPCServer()
@@ -129,6 +160,28 @@ func Distributed(jobName string, files []string, nreduce int, master string) (mr
 // statistics are collected, and the master is shut down.
 //
 // Note that this implementation assumes a shared file system.
+// 这个是master.go 中最为重要的一个函数
+// 1. 根据 mapper 的数量 切分 输入文件， 并分配到相应的worker 中
+// 2. 每个 worker 需要 根据 reducer 的数量 将它的输出分成多个 bin
+// 3. 每个 bin 发送给一个 reducer 进行reduce处理
+// 4. merge 合并输出文件
+// 例如计算一个大文件中单词出现的次数这种情况
+// 1. 切分文件为 len(mapper) 个小块 并把每个文件发送给对应的worker
+// 2. worker 开始计算，并将输出结果 分成 len(reducer) 个部分
+// 比如 第一个mapper 的输出为 (a:1, aa:10, aaa:100,bb:20)
+// merge 中间结果怎么进行？使用hash 函数直接搞定了貌似
+// (map function 应该输出的是 [(a,1),(aa,1),(a,1),(a,1)
+// (aa,1)] 这种 combine 是从中把所有键相等的键值对进行组合
+// 而实际上不组合也是可以的，只是会增加节点间通信负担
+// 这里貌似 mapper 直接进行了combine 的操作
+// 且 len（reducer） = 2， 那么使用哈希函数将 (a:1,aaa:100)
+// 发送给第一个reducer ，剩下的 发送给第二个reducer
+// 注意 这个hash 函数是对数据进行hash 的，这样就保证了第一个mapper 中
+// 对应 a 的 出现次数 和第二个 mapper 中对应 a 的出现次数能被
+// 同一个 reducer 接收
+// 这样 完成 统计后 第一个 reducer 持有 (a, aaa) 的全部统计结果
+// 第二个reducer 持有其余单词的统计结果，这样merge后得到了统计结果
+
 func (mr *Master) run(jobName string, files []string, nreduce int,
 	schedule func(phase jobPhase),
 	finish func(),
